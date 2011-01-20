@@ -6,6 +6,7 @@ configure
 Makefile
 Makefile.in
 libtool
+build/ltmain.sh
 .deps
 .libs
 *.1
