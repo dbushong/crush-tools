@@ -1,0 +1,5 @@
+config.h
+config.h.in
+crush/crush_version.h
+libcrush.la
+stamp-h1

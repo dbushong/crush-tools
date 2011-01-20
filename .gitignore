@@ -1,0 +1,15 @@
+aclocal.m4
+autom4te.cache
+config.log
+config.status
+configure
+Makefile
+Makefile.in
+libtool
+.deps
+.libs
+*.1
+*.o
+*.lo
+*.swp
+*_main.h
