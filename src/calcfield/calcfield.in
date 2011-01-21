@@ -83,7 +83,7 @@ my %header_map;
 # Should we preserve the header line?
 if ($preserve_header) {
   if ($line = <>) {
-    $line = trim($line);  
+    chomp($line);
     @parts = split(/\Q$delim\E/, $line);
     
     # map header labels to indexes (needed during the expressions evaluation).
@@ -112,7 +112,7 @@ if ($preserve_header) {
 my  $calc_func = create_calc_func($expression, \%header_map);
 
 while ($line = <>) {
-  $line = trim($line);
+  chomp($line);
   @parts = split(/\Q$delim\E/, $line, -1);
 
   $result = $calc_func->(\@parts, $fallback_value);
@@ -153,7 +153,7 @@ sub create_calc_func {
     while ($formula =~ /(\[\s*)([A-Za-z][^\]]+)(\s*\])/g) {
       my $label_idx = $header_map->{$2};
       if (defined($label_idx)) {
-        $formula =~ s/\Q$1$2$3\E/\$parts->\[$label_idx\]/;
+        $formula =~ s/\Q$1$2$3\E/trim(\$parts->\[$label_idx\])/;
       }
       else {
         die "$0: undefined header label: $2\n";
@@ -186,8 +186,7 @@ CALC_FUNC
 
 sub trim {
   my $text = shift;
-  $text =~ s/^\s+//;
-  $text =~ s/\s+$//;
+  $text =~ s/^\s+|\s+$//g;
 
   return $text;
 }
