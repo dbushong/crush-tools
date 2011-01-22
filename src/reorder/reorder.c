@@ -14,7 +14,6 @@
    limitations under the License.
  ********************************/
 
-#include <crush/crushstr.h>
 #include <crush/general.h>
 
 #include "reorder_main.h"
@@ -26,8 +25,9 @@ int reorder(struct cmdargs *args, int argc, char *argv[], int optind) {
   FILE *fp, *fpout;
   dbfr_t *reader;
 
-  char *wbuf = NULL;            /* working buffer */
-  size_t wbs = 0;               /* working buffer size */
+  crushstr_t wbuf;            /* line buffer */
+  crushstr_t fbuf;            /* field buffer */
+  wbuf.buffer = fbuf.buffer = NULL;  /* so crushstr_resize() will init */
 
   int *order = NULL;
   size_t order_sz = 0;
@@ -99,28 +99,21 @@ int reorder(struct cmdargs *args, int argc, char *argv[], int optind) {
 
   while (fp != NULL) {
     while (dbfr_getline(reader) > 0) {
-      /* make sure there's enough room in the working buffer */
-      if (wbuf == NULL) {
-        wbuf = xmalloc(reader->current_line_sz);
-        wbs = reader->current_line_sz;
-      } else if (wbs < reader->current_line_sz) {
-        /* if realloc unsuccessful, we don't want wbuf to end up being NULL */
-        char *tmp_ptr;
-        wbuf = xrealloc(wbuf, reader->current_line_sz);
-        wbs = reader->current_line_sz;
-      }
+      /* make sure there's enough room in the line and field buffers */
+      crushstr_resize(&wbuf, reader->current_line_sz);
+      crushstr_resize(&fbuf, reader->current_line_sz);
 
       if (!args->fields && !args->field_labels) {
-        doswap(&swap_list, wbuf, reader->current_line, args->delim);
+        doswap(&swap_list, wbuf.buffer, reader->current_line, args->delim);
       } else {
-        if (docut(&wbuf, reader->current_line, &wbs, args->delim,
+        if (docut(&wbuf, &fbuf, reader->current_line, args->delim,
                   order, order_elems) < 0) {
           fprintf(stderr, "%s: out of memory.\n", getenv("_"));
           return EXIT_MEM_ERR;
         }
       }
-      fputs(wbuf, fpout);
-      memset(wbuf, 0, wbs);
+      fputs(wbuf.buffer, fpout);
+      memset(wbuf.buffer, 0, wbuf.capacity);
     }
 
     dbfr_close(reader);
@@ -267,49 +260,34 @@ void doswap(llist_t *list, char *s, char *ct, const char *d) {
 
 
 
-int docut(char **s, const char *ct, size_t * s_sz, const char *d,
+int docut(crushstr_t *wbuf, crushstr_t *fbuf, const char *ct, const char *d,
           const int *order, const size_t n) {
   int i;
-  crushstr_t buffer;
   size_t s_len;
   size_t buf_len;
   size_t delim_len;
+  char *s = wbuf->buffer;
+  char *buffer = fbuf->buffer;
 
-  /* make sure the destination buffer is allocated */
-  if (*s == NULL || *s_sz == 0) {
-    *s = xmalloc(strlen(ct));
-    *s_sz = strlen(ct);
-  }
-
-  crushstr_init(&buffer, *s_sz);
-  (*s)[0] = '\0';
+  s[0] = '\0';
   s_len = 0;
   delim_len = strlen(d);
 
   for (i = 0; i < n; i++) {
 
-    if ((buf_len = get_line_field(buffer.buffer, ct, *s_sz,
+    if ((buf_len = get_line_field(buffer, ct, fbuf->capacity,
                                   order[i] - 1, (char *) d)) >= 0) {
-
-      if (*s_sz < s_len + buf_len + delim_len) {
-        char *tmp;
-        /* include room for a null terminator and line break. */
-        *s = xrealloc(*s, *s_sz + buf_len + delim_len + 2);
-        *s_sz += buf_len + delim_len + 2;
-      }
-
-      chomp(buffer.buffer);
-      strcat(*s, buffer.buffer);
+      chomp(buffer);
+      strcat(s, buffer);
       s_len += buf_len;
 
       if (i < n - 1) {
-        strcat(*s, d);
+        strcat(s, d);
         s_len += delim_len;
       }
     }
   }
-  strcat(*s, "\n");
-  crushstr_destroy(&buffer);
+  s[s_len] = '\n';
   return s_len + 1;
 }
 

@@ -29,6 +29,7 @@
 #include <crush/ffutils.h>
 #include <crush/dbfr.h>
 #include <crush/linklist.h>
+#include <crush/crushstr.h>
 
 #ifndef REORDER_H
 #define REORDER_H
@@ -76,16 +77,16 @@ int parse_swap_list(llist_t *args, llist_t *pairs,
   * it is entirely possible for the output to be larger than the input, so
   * this function may dynamically resize s as necessary.
   *
-  * @param s address of destination buffer
+  * @param s address of crushstr_t containing destination buffer
+  * @param s address of crushstr_t containing field buffer
   * @param ct source buffer
-  * @param s_sz address of the size of destination buffer
   * @param d delimiter
   * @param o array of field numbers
   * @param n number of elements in o
   *
   * @return the length of s on success; < 0 on error
   */
-int docut(char **s, const char *ct, size_t * s_sz, const char *d,
+int docut(crushstr_t *wbuf, crushstr_t *fbuf, const char *ct, const char *d,
           const int *order, const size_t n);
 
 #endif /* REORDER_H */
