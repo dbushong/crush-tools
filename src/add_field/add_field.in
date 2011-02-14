@@ -151,7 +151,7 @@ usage: $0 [hdflv] [file(s)]
   -A, --After <S>        place the new field after the field with the specified
                            label.
   -l, --label <S>        label the new field as S on the first line
-  -v, --value <S>        the value to place in the new field (default: emtpy)
+  -v, --value <S>        the value to place in the new field (default: empty)
   -c, --copy <N>         copy the value from field N into the new field
   -C, --Copy-label <S>   copy the new value from field labelled S
 
