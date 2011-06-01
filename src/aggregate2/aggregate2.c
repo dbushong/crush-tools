@@ -21,15 +21,14 @@
 
 struct agg_conf {
   int *key_fields;
-  size_t key_fields_sz;
   int nkeys;
   int *count_fields;
-  size_t count_fields_sz;
   int ncounts;
   int *sum_fields;
-  size_t sum_fields_sz;
   int nsums;
   int *sum_precisions;
+  int *join_fields;
+  int njoins;
   /* averages not implemented in agg2 yet.
   int *average_fields; 
   size_t average_fields_sz;
@@ -47,7 +46,8 @@ static void print_line(FILE * out,
                        const char *delim,
                        const int *counts,
                        size_t ncounts,
-                       const double *sums, int nsums, int *sum_precisions);
+                       const double *sums, int nsums, int *sum_precisions,
+                       char **joins, size_t njoins);
 
 static int extract_keys(char *target, const char *source, const char *delim,
                         int *keys, size_t nkeys, const char *suffix);
@@ -66,6 +66,7 @@ static int float_precision(char *n);
 int aggregate2(struct cmdargs *args, int argc, char *argv[], int optind) {
 
   char default_delim[] = { 0xfe, 0x00 };
+  char *default_join_str = ",";
 
   FILE *in, *out;
   dbfr_t *in_reader;
@@ -80,8 +81,12 @@ int aggregate2(struct cmdargs *args, int argc, char *argv[], int optind) {
 
   int *cur_counts = NULL;
   double *cur_sums = NULL;
+  char **cur_joins = NULL;
+  int *cur_join_sizes = NULL;
+  size_t join_str_len;
+  int join_len;
 
-  char field_buf[64];
+  char field_buf[1024];         /* FIXME: should be dynamically resized */
   double f;                     /* numeric value of sum fields */
   int i;                        /* counter */
 
@@ -92,9 +97,10 @@ int aggregate2(struct cmdargs *args, int argc, char *argv[], int optind) {
 
   /* individually these args are not required. */
   if (!(args->sums || args->sum_labels) &&
-      !(args->counts || args->count_labels)) {
+      !(args->counts || args->count_labels) &&
+      !(args->joins || args->join_labels)) {
     fprintf(stderr,
-            "%s: at least one of -s/-S and -c/-C must be specified.\n",
+            "%s: at least one of -s/-S, -c/-C, or -j/-J must be specified.\n",
             argv[0]);
     return EXIT_HELP;
   }
@@ -104,6 +110,9 @@ int aggregate2(struct cmdargs *args, int argc, char *argv[], int optind) {
       args->delim = default_delim;
   }
   expand_chars(args->delim);
+
+  if (!args->join_str) args->join_str = default_join_str;
+  join_str_len = strlen(args->join_str);
 
   if (optind < argc) {
     in = nextfile(argc, argv, &optind, "r");
@@ -124,7 +133,7 @@ int aggregate2(struct cmdargs *args, int argc, char *argv[], int optind) {
   if (args->outfile) {
     out = fopen(args->outfile, "w");
     if (!out) {
-      warn(args->outfile);
+      warn("%s", args->outfile);
       return EXIT_FILE_ERR;
     }
   } else {
@@ -136,6 +145,17 @@ int aggregate2(struct cmdargs *args, int argc, char *argv[], int optind) {
 
   if (conf.nsums > 0)
     cur_sums = calloc(conf.nsums, sizeof(double));
+
+  if (conf.njoins > 0) {
+    cur_joins = calloc(conf.njoins, sizeof(char*));
+    cur_join_sizes = calloc(conf.njoins, sizeof(int));
+    /* these can be resized later */
+    for (i = 0; i < conf.njoins; i++) {
+      cur_join_sizes[i] = 1024;
+      cur_joins[i]      = xmalloc(sizeof(char) * 1024);
+      cur_joins[i][0]   = '\0';
+    }
+  }
 
   /* this can be resized later */
   cur_keys = xmalloc(sizeof(char) * 1024);
@@ -165,7 +185,7 @@ int aggregate2(struct cmdargs *args, int argc, char *argv[], int optind) {
         if (extract_keys(cur_keys, in_reader->current_line, args->delim,
                          conf.sum_fields, conf.nsums,
                          args->auto_label ? "-Sum" : NULL) != 0) {
-          fprintf(stderr, "%s: malformatted input\n", argv[0]);
+          fprintf(stderr, "%s: malformatted input for -s/-S\n", argv[0]);
           return EXIT_FILE_ERR;
         }
         fprintf(out, "%s%s", args->delim, cur_keys);
@@ -175,7 +195,17 @@ int aggregate2(struct cmdargs *args, int argc, char *argv[], int optind) {
         if (extract_keys(cur_keys, in_reader->current_line, args->delim,
                          conf.count_fields, conf.ncounts,
                          args->auto_label ? "-Count" : NULL) != 0) {
-          fprintf(stderr, "%s: malformatted input\n", argv[0]);
+          fprintf(stderr, "%s: malformatted input for -c/-C\n", argv[0]);
+          return EXIT_FILE_ERR;
+        }
+        fprintf(out, "%s%s", args->delim, cur_keys);
+      }
+
+      if (conf.njoins > 0) {
+        if (extract_keys(cur_keys, in_reader->current_line, args->delim,
+                         conf.join_fields, conf.njoins,
+                         args->auto_label ? "-Join" : NULL) != 0) {
+          fprintf(stderr, "%s: malformatted input for -j/-J\n", argv[0]);
           return EXIT_FILE_ERR;
         }
         fprintf(out, "%s%s", args->delim, cur_keys);
@@ -205,14 +235,15 @@ int aggregate2(struct cmdargs *args, int argc, char *argv[], int optind) {
       if (prev_keys_initialized && !str_eq(cur_keys, prev_keys)) {
         print_line(out, prev_keys, args->delim, cur_counts,
                    conf.ncounts, cur_sums,
-                   conf.nsums, conf.sum_precisions);
+                   conf.nsums, conf.sum_precisions, cur_joins, conf.njoins);
 
         memset(cur_counts, 0, conf.ncounts * sizeof(int));
         memset(cur_sums, 0, conf.nsums * sizeof(double));
+        for (i = 0; i < conf.njoins; i++) cur_joins[i][0] = '\0';
       }
 
       for (i = 0; i < conf.ncounts; i++) {
-        get_line_field(field_buf, in_reader->current_line, 63,
+        get_line_field(field_buf, in_reader->current_line, 1023,
                        conf.count_fields[i], args->delim);
         if (field_buf[0] != '\0') {
           cur_counts[i]++;
@@ -220,7 +251,7 @@ int aggregate2(struct cmdargs *args, int argc, char *argv[], int optind) {
       }
 
       for (i = 0; i < conf.nsums; i++) {
-        get_line_field(field_buf, in_reader->current_line, 63,
+        get_line_field(field_buf, in_reader->current_line, 1023,
                        conf.sum_fields[i], args->delim);
         f = atof(field_buf);
         cur_sums[i] += f;
@@ -229,6 +260,20 @@ int aggregate2(struct cmdargs *args, int argc, char *argv[], int optind) {
 
         if (cur_precision > conf.sum_precisions[i])
           conf.sum_precisions[i] = cur_precision;
+      }
+
+      for (i = 0; i < conf.njoins; i++) {
+        get_line_field(field_buf, in_reader->current_line, 1023,
+                       conf.join_fields[i], args->delim);
+        join_len = strlen(field_buf) + join_str_len + strlen(cur_joins[i]);
+        if (join_len >= cur_join_sizes[i])
+          cur_joins[i] = xrealloc(cur_joins[i], cur_join_sizes[i] = join_len+1);
+        if (cur_joins[i][0] == '\0')
+          strcpy(cur_joins[i], field_buf);
+        else {
+          strcat(cur_joins[i], args->join_str);
+          strcat(cur_joins[i], field_buf);
+        }
       }
 
       strcpy(prev_keys, cur_keys);
@@ -250,7 +295,7 @@ int aggregate2(struct cmdargs *args, int argc, char *argv[], int optind) {
   }
 
   print_line(out, prev_keys, args->delim, cur_counts, conf.ncounts,
-             cur_sums, conf.nsums, conf.sum_precisions);
+             cur_sums, conf.nsums, conf.sum_precisions, cur_joins, conf.njoins);
 
   free(cur_counts);
   free(cur_sums);
@@ -271,13 +316,13 @@ static void decrement_values(int *array, size_t sz) {
 
 int configure_aggregation(struct agg_conf *conf, struct cmdargs *args,
                           const char *header, const char *delim) {
+  size_t ignore_sz;
+
   if (args->keys) {
-    conf->nkeys = expand_nums(args->keys, &(conf->key_fields),
-                              &(conf->key_fields_sz));
+    conf->nkeys = expand_nums(args->keys, &(conf->key_fields), &ignore_sz);
   } else if (args->key_labels) {
     conf->nkeys = expand_label_list(args->key_labels, header,
-                                    delim, &(conf->key_fields),
-                                    &(conf->key_fields_sz));
+                                    delim, &(conf->key_fields), &ignore_sz);
     args->preserve_header = 1;
   }
   if (conf->nkeys < 0)
@@ -285,12 +330,10 @@ int configure_aggregation(struct agg_conf *conf, struct cmdargs *args,
   decrement_values(conf->key_fields, conf->nkeys);
 
   if (args->sums) {
-    conf->nsums = expand_nums(args->sums, &(conf->sum_fields),
-                              &(conf->sum_fields_sz));
+    conf->nsums = expand_nums(args->sums, &(conf->sum_fields), &ignore_sz);
   } else if (args->sum_labels) {
     conf->nsums = expand_label_list(args->sum_labels, header,
-                                    delim, &(conf->sum_fields),
-                                    &(conf->sum_fields_sz));
+                                    delim, &(conf->sum_fields), &ignore_sz);
     args->preserve_header = 1;
   }
   if (conf->nsums < 0) {
@@ -302,18 +345,28 @@ int configure_aggregation(struct agg_conf *conf, struct cmdargs *args,
   }
 
   if (args->counts) {
-    conf->ncounts = expand_nums(args->counts, &(conf->count_fields),
-                                &(conf->count_fields_sz));
+    conf->ncounts = expand_nums(args->counts, &(conf->count_fields),&ignore_sz);
   } else if (args->count_labels) {
     conf->ncounts = expand_label_list(args->count_labels, header,
-                                      delim, &(conf->count_fields),
-                                      &(conf->count_fields_sz));
+                                      delim, &(conf->count_fields), &ignore_sz);
     args->preserve_header = 1;
   }
   if (conf->ncounts < 0)
     return conf->ncounts;
   else if (conf->ncounts > 0)
     decrement_values(conf->count_fields, conf->ncounts);
+
+  if (args->joins) {
+    conf->njoins = expand_nums(args->joins, &(conf->join_fields), &ignore_sz);
+  } else if (args->join_labels) {
+    conf->njoins = expand_label_list(args->join_labels, header,
+                                     delim, &(conf->join_fields), &ignore_sz);
+    args->preserve_header = 1;
+  }
+  if (conf->njoins < 0)
+    return conf->njoins;
+  else if (conf->njoins > 0)
+    decrement_values(conf->join_fields, conf->njoins);
 /*
   if (args->averages) {
     conf->naverages = expand_nums(args->averages, &(conf->average_fields),
@@ -367,7 +420,9 @@ static void print_line(FILE * out,
                        const char *delim,
                        const int *counts,
                        size_t ncounts,
-                       const double *sums, int nsums, int *sum_precisions) {
+                       const double *sums, int nsums, int *sum_precisions,
+                       char **joins,
+                       size_t njoins) {
   int i;
   fputs(keys, out);
 
@@ -377,6 +432,11 @@ static void print_line(FILE * out,
 
   for (i = 0; i < ncounts; i++) {
     fprintf(out, "%s%d", delim, counts[i]);
+  }
+
+  for (i = 0; i < njoins; i++) {
+    fputs(delim, out);
+    fputs(joins[i], out);
   }
 
   fputs("\n", out);

@@ -118,6 +118,27 @@ END_COPYRIGHT
 	  description => 'labels of fields to be counted if non-blank'
 	},
 	{
+	  name        => 'joins',
+	  shortopt    => 'j',
+	  longopt     => 'joins',
+	  type        => 'var',
+	  description => 'indexes of fields to be joined'
+	},
+	{
+	  name        => 'join_labels',
+	  shortopt    => 'J',
+	  longopt     => 'join-labels',
+	  type        => 'var',
+	  description => 'labels of fields to be joined'
+	},
+	{
+	  name        => 'join_str',
+	  shortopt    => 'i',
+	  longopt     => 'join-str',
+	  type        => 'var',
+	  description => 'string to join on (default: ,)'
+	},
+	{
 	  name        => 'outfile',
 	  shortopt    => 'o',
 	  longopt     => 'outfile',
@@ -138,6 +159,6 @@ END_COPYRIGHT
     longopt => 'auto-label',
     type => 'flag',
     required => 0,
-    description => 'add \\"-Sum\\" or \\"-Count\\" suffixes to aggregation fields',
+    description => 'add \\"-Sum\\", \\"-Count\\", or \\"-Join\\" suffixes to aggregation fields',
   },
 );
