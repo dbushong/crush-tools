@@ -316,8 +316,7 @@ static void decrement_values(int *array, size_t sz) {
 
 int configure_aggregation(struct agg_conf *conf, struct cmdargs *args,
                           const char *header, const char *delim) {
-  size_t ignore_sz;
-
+  size_t ignore_sz = 0;
   if (args->keys) {
     conf->nkeys = expand_nums(args->keys, &(conf->key_fields), &ignore_sz);
   } else if (args->key_labels) {
@@ -329,6 +328,7 @@ int configure_aggregation(struct agg_conf *conf, struct cmdargs *args,
     return conf->nkeys;
   decrement_values(conf->key_fields, conf->nkeys);
 
+  ignore_sz = 0;
   if (args->sums) {
     conf->nsums = expand_nums(args->sums, &(conf->sum_fields), &ignore_sz);
   } else if (args->sum_labels) {
@@ -344,6 +344,7 @@ int configure_aggregation(struct agg_conf *conf, struct cmdargs *args,
     memset(conf->sum_precisions, 0, sizeof(int) * conf->nsums);
   }
 
+  ignore_sz = 0;
   if (args->counts) {
     conf->ncounts = expand_nums(args->counts, &(conf->count_fields),&ignore_sz);
   } else if (args->count_labels) {
@@ -356,6 +357,7 @@ int configure_aggregation(struct agg_conf *conf, struct cmdargs *args,
   else if (conf->ncounts > 0)
     decrement_values(conf->count_fields, conf->ncounts);
 
+  ignore_sz = 0;
   if (args->joins) {
     conf->njoins = expand_nums(args->joins, &(conf->join_fields), &ignore_sz);
   } else if (args->join_labels) {
