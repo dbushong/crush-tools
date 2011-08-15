@@ -102,6 +102,7 @@ int reorder(struct cmdargs *args, int argc, char *argv[], int optind) {
       /* make sure there's enough room in the line and field buffers */
       crushstr_resize(&wbuf, reader->current_line_sz);
       crushstr_resize(&fbuf, reader->current_line_sz);
+      memset(wbuf.buffer, 0, wbuf.capacity);
 
       if (!args->fields && !args->field_labels) {
         doswap(&swap_list, wbuf.buffer, reader->current_line, args->delim);
@@ -113,7 +114,6 @@ int reorder(struct cmdargs *args, int argc, char *argv[], int optind) {
         }
       }
       fputs(wbuf.buffer, fpout);
-      memset(wbuf.buffer, 0, wbuf.capacity);
     }
 
     dbfr_close(reader);
